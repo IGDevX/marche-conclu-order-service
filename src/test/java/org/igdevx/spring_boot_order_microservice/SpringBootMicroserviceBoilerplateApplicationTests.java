@@ -1,10 +1,10 @@
-package org.igdevx.spring_boot_microservice_boilerplate;
+package org.igdevx.spring_boot_order_microservice;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class SpringBootMicroserviceBoilerplateApplicationTests {
+class SpringBootMicroserviceOrderApplicationTests {
 
 	@Test
 	void contextLoads() {
