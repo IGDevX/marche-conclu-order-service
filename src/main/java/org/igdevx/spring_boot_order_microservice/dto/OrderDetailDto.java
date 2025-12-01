@@ -1,17 +1,27 @@
 package org.igdevx.spring_boot_order_microservice.dto;
 
-import lombok.Data;
+import lombok.*;
 import java.math.BigDecimal;
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 
+import org.igdevx.spring_boot_order_microservice.entity.DeliveryMode;
+import org.igdevx.spring_boot_order_microservice.entity.OrderStatus;
+
 @Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class OrderDetailDto {
     private Long id;
     private String reference;
-    private Long producerId;
-    private String status;
+    private String producerKeycloakId;
+    private String consumerKeycloakId;
+    private Long producerInternalId;
+    private Long customerId;
+    private OrderStatus status;
+    private DeliveryMode deliveryMode;
     private BigDecimal totalAmount;
-    private Instant createdAt;
+    private LocalDateTime createdAt;
     private List<OrderItemDetailDto> items;
 }

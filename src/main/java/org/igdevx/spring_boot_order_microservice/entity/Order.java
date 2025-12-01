@@ -1,46 +1,59 @@
 package org.igdevx.spring_boot_order_microservice.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
 import java.math.BigDecimal;
-import java.time.Instant;
-import java.util.ArrayList;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Entity
 @Table(name = "orders")
-@Getter
-@Setter
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class Order {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "reference", nullable = false, unique = true)
+    @Column(unique = true, nullable = false)
     private String reference;
 
-    @Column(name = "producer_id", nullable = false)
-    private Long producerId;
+    @Column(name = "producer_keycloak_id")
+    private String producer_keycloak_id;
+    
+    @Column(name = "consumer_keycloak_id")
+    private String consumer_keycloak_id;
 
-    @Column(name = "status", nullable = false)
-    private String status;
+    @Column(name = "producer_internal_id")
+    private Long producerInternalId;
 
-    @Column(name = "total_amount", nullable = false)
+    @Column(nullable = false)
+    private Long customerId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private OrderStatus status;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "delivery_mode")
+    private DeliveryMode deliveryMode;
+
+    @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal totalAmount;
 
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt = Instant.now();
+    @Column(nullable = false)
+    final LocalDateTime createdAt = LocalDateTime.now();
 
-    @Column(name = "updated_at", nullable = false)
-    private Instant updatedAt = Instant.now();
+    @Column(nullable = false)
+    final LocalDateTime updatedAt = LocalDateTime.now();
 
     @Version
+    @Column(nullable = false)
     private Long version;
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
-    @JsonIgnore
-    private List<OrderItem> items = new ArrayList<>();
+    private List<OrderItem> items;
 }

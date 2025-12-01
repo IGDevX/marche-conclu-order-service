@@ -1,6 +1,8 @@
 package org.igdevx.spring_boot_order_microservice.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.igdevx.spring_boot_order_microservice.client.AccountClient;
 import org.igdevx.spring_boot_order_microservice.client.PaymentClient;
 import org.igdevx.spring_boot_order_microservice.dto.CreateOrderRequest;
@@ -10,6 +12,8 @@ import org.igdevx.spring_boot_order_microservice.entity.IdempotencyKey;
 import org.igdevx.spring_boot_order_microservice.entity.Order;
 import org.igdevx.spring_boot_order_microservice.entity.OrderItem;
 import org.igdevx.spring_boot_order_microservice.entity.OrderPayment;
+import org.igdevx.spring_boot_order_microservice.entity.OrderStatus;
+import org.igdevx.spring_boot_order_microservice.entity.DeliveryMode;
 import org.igdevx.spring_boot_order_microservice.exception.AccountServiceException;
 import org.igdevx.spring_boot_order_microservice.exception.InvalidOrderStateException;
 import org.igdevx.spring_boot_order_microservice.exception.OrderNotFoundException;
@@ -27,6 +31,8 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
+@Slf4j
 public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
@@ -34,26 +40,17 @@ public class OrderServiceImpl implements OrderService {
     private final AccountClient accountClient;
     private final IdempotencyKeyRepository idempotencyKeyRepository;
     private final OrderPaymentRepository orderPaymentRepository;
-    private final ObjectMapper objectMapper;
+    private final NotificationProducer notificationProducer;
 
-    public OrderServiceImpl(OrderRepository orderRepository, PaymentClient paymentClient, AccountClient accountClient,
-                            IdempotencyKeyRepository idempotencyKeyRepository, OrderPaymentRepository orderPaymentRepository) {
-        this.orderRepository = orderRepository;
-        this.paymentClient = paymentClient;
-        this.accountClient = accountClient;
-        this.idempotencyKeyRepository = idempotencyKeyRepository;
-        this.orderPaymentRepository = orderPaymentRepository;
-        this.objectMapper = new ObjectMapper();
-    }
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Transactional
     @Override
     public CreateOrderResponse createOrder(CreateOrderRequest req) {
-        // Check idempotency key if provided
+        // Handle idempotency
         if (req.getIdempotencyKey() != null && !req.getIdempotencyKey().isBlank()) {
             var existing = idempotencyKeyRepository.findByKey(req.getIdempotencyKey());
             if (existing.isPresent()) {
-                // Return cached response
                 try {
                     return objectMapper.readValue(existing.get().getResponseBody(), CreateOrderResponse.class);
                 } catch (Exception e) {
@@ -61,29 +58,64 @@ public class OrderServiceImpl implements OrderService {
                 }
             }
         }
-        
+
+        // Build order
         Order order = new Order();
-        order.setProducerId(req.getProducerId());
-        order.setStatus("CREATED");
-        List<OrderItem> items = req.getItems().stream().map(dto -> {
-            OrderItem it = new OrderItem();
-            it.setProductId(dto.getProductId());
-            it.setQuantity(dto.getQuantity());
-            it.setUnitPrice(dto.getUnitPrice());
-            it.setSubtotal(dto.getUnitPrice().multiply(BigDecimal.valueOf(dto.getQuantity())));
-            return it;
-        }).collect(Collectors.toList());
-        // associate items with order
-        items.forEach(it -> it.setOrder(order));
-        order.setItems(items);
-        BigDecimal total = items.stream().map(OrderItem::getSubtotal).reduce(BigDecimal.ZERO, BigDecimal::add);
-        order.setTotalAmount(total);
+        order.setProducer_keycloak_id(req.getProducer_keycloak_id());
+        order.setConsumer_keycloak_id(req.getConsumer_keycloak_id());
+        order.setProducerInternalId(req.getProducerInternalId());
+        order.setCustomerId(req.getCustomerId());
+        order.setStatus(OrderStatus.pending);
         order.setReference(UUID.randomUUID().toString());
+        
+        // Set delivery mode (default to pickup if not provided)
+        if (req.getDeliveryMode() != null && !req.getDeliveryMode().isBlank()) {
+            try {
+                order.setDeliveryMode(DeliveryMode.valueOf(req.getDeliveryMode().toLowerCase()));
+            } catch (IllegalArgumentException e) {
+                order.setDeliveryMode(DeliveryMode.pickup);
+            }
+        } else {
+            order.setDeliveryMode(DeliveryMode.pickup);
+        }
+
+        // Build order items
+        List<OrderItem> items = req.getItems().stream()
+                .map(dto -> {
+                    OrderItem it = new OrderItem();
+                    it.setProductId(dto.getProductId());
+                    it.setQuantity(dto.getQuantity());
+                    it.setUnitPrice(dto.getUnitPrice());
+                    it.setSubtotal(dto.getUnitPrice().multiply(BigDecimal.valueOf(dto.getQuantity())));
+                    it.setOrder(order);
+                    return it;
+                }).collect(Collectors.toList());
+
+        order.setItems(items);
+
+        // Total amount
+        BigDecimal total = items.stream()
+                .map(OrderItem::getSubtotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        order.setTotalAmount(total);
+
         Order saved = orderRepository.save(order);
-        
-        CreateOrderResponse response = new CreateOrderResponse(saved.getReference());
-        
-        // Store idempotency key if provided
+
+        // Send notification
+        try {
+            notificationProducer.notifyOrderCreated(
+                    saved.getProducer_keycloak_id(),
+                    saved.getReference(),
+                    saved.getTotalAmount().toString());
+        } catch (Exception e) {
+            log.warn("Failed to send order notification: {}", e.getMessage());
+        }
+
+        CreateOrderResponse response = new CreateOrderResponse();
+        response.setId(saved.getId());
+        response.setReference(saved.getReference());
+
+        // Store idempotency key
         if (req.getIdempotencyKey() != null && !req.getIdempotencyKey().isBlank()) {
             try {
                 IdempotencyKey key = new IdempotencyKey();
@@ -91,11 +123,10 @@ public class OrderServiceImpl implements OrderService {
                 key.setResponseBody(objectMapper.writeValueAsString(response));
                 idempotencyKeyRepository.save(key);
             } catch (Exception e) {
-                // Log but don't fail the request
-                System.err.println("Failed to store idempotency key: " + e.getMessage());
+                log.warn("Failed to store idempotency key: {}", e.getMessage());
             }
         }
-        
+
         return response;
     }
 
@@ -104,10 +135,10 @@ public class OrderServiceImpl implements OrderService {
     public void handlePaymentConfirmation(String reference, Map<String, Object> paymentData) {
         Order order = orderRepository.findByReference(reference)
                 .orElseThrow(() -> new OrderNotFoundException("reference", reference));
-        
+
         String paymentIntentId = (String) paymentData.get("paymentIntentId");
         String status = (String) paymentData.get("status");
-        
+
         // Create payment record
         OrderPayment payment = new OrderPayment();
         payment.setOrder(order);
@@ -115,19 +146,19 @@ public class OrderServiceImpl implements OrderService {
         payment.setStatus(status);
         payment.setAmount(order.getTotalAmount());
         orderPaymentRepository.save(payment);
-        
+
         // Update order status
         if ("succeeded".equals(status)) {
-            order.setStatus("PAID");
+            order.setStatus(OrderStatus.paid);
         } else {
-            order.setStatus("PAYMENT_FAILED");
+            order.setStatus(OrderStatus.unpaid);
         }
         orderRepository.save(order);
     }
 
     @Transactional
     @Override
-    public void updateStatus(String reference, String newStatus) {
+    public void updateStatus(String reference, OrderStatus newStatus) {
         Order order = orderRepository.findByReference(reference)
                 .orElseThrow(() -> new OrderNotFoundException("reference", reference));
         order.setStatus(newStatus);
@@ -136,21 +167,18 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public PaymentIntentResponse createPaymentIntent(String reference) {
-        // Find order
         Order order = orderRepository.findByReference(reference)
                 .orElseThrow(() -> new OrderNotFoundException("reference", reference));
-        
-        // check producer has stripe account
+
+        // Check producer Stripe account
         try {
-            boolean hasAccount = accountClient.hasStripeAccount(order.getProducerId());
-            if (!hasAccount) {
+            boolean hasAccount = accountClient.hasStripeAccount(order.getProducer_keycloak_id());
+            if (!hasAccount)
                 throw new InvalidOrderStateException("Producer does not have a Stripe account configured");
-            }
         } catch (Exception e) {
             throw new AccountServiceException("Failed to verify producer account", e);
         }
-        
-        // call payment service
+
         try {
             return paymentClient.createPaymentIntent(reference, order.getTotalAmount(), "usd");
         } catch (Exception e) {
@@ -160,11 +188,35 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public Order getOrder(Long id) {
-        return orderRepository.findById(id).orElse(null);
+        return orderRepository.findById(id).orElseThrow(() -> new OrderNotFoundException(id));
     }
 
     @Override
     public List<Order> listOrders() {
         return orderRepository.findAll();
+    }
+
+    @Override
+    public List<Order> listOrdersByProducerInternalId(Long producerInternalId) {
+        return orderRepository.findByProducerInternalId(producerInternalId);
+    }
+
+    @Override
+    public List<Order> listOrdersByCustomer(Long customerId) {
+        return orderRepository.findByCustomerId(customerId);
+    }
+
+    @Transactional
+    @Override
+    public Order updateOrderStatus(Long orderId, OrderStatus newStatus) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        
+        order.setStatus(newStatus);
+        Order updatedOrder = orderRepository.save(order);
+        
+        log.info("Updated order {} status to {}", orderId, newStatus);
+        
+        return updatedOrder;
     }
 }

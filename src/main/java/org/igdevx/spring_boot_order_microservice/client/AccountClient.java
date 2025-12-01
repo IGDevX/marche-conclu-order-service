@@ -15,7 +15,7 @@ public class AccountClient {
      * Check whether producer has a connected Stripe account.
      * Returns true if account exists (200), false otherwise.
      */
-    public boolean hasStripeAccount(Long producerId) {
+    public boolean hasStripeAccount(String producerId) {
         Mono<Boolean> mono = webClient.get()
                 .uri(uriBuilder -> uriBuilder.path("/producers/{id}/stripe-account").build(producerId))
                 .exchangeToMono(resp -> Mono.just(resp.statusCode().is2xxSuccessful()))

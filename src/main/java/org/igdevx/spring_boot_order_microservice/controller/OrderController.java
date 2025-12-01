@@ -6,6 +6,7 @@ import org.igdevx.spring_boot_order_microservice.dto.CreateOrderResponse;
 import org.igdevx.spring_boot_order_microservice.dto.OrderDetailDto;
 import org.igdevx.spring_boot_order_microservice.dto.OrderItemDetailDto;
 import org.igdevx.spring_boot_order_microservice.dto.PaymentIntentResponse;
+import org.igdevx.spring_boot_order_microservice.dto.UpdateOrderStatusRequest;
 import org.igdevx.spring_boot_order_microservice.entity.Order;
 import org.igdevx.spring_boot_order_microservice.entity.OrderItem;
 import org.igdevx.spring_boot_order_microservice.exception.OrderNotFoundException;
@@ -23,7 +24,9 @@ public class OrderController {
 
     private final OrderService orderService;
 
-    public OrderController(OrderService orderService) { this.orderService = orderService; }
+    public OrderController(OrderService orderService) {
+        this.orderService = orderService;
+    }
 
     @PostMapping
     public ResponseEntity<CreateOrderResponse> create(@Valid @RequestBody CreateOrderRequest req) {
@@ -40,6 +43,20 @@ public class OrderController {
         return ResponseEntity.ok(toDetailDto(order));
     }
 
+    @GetMapping("/producer/{producerInternalId}") // Changed from {producerId}
+    public ResponseEntity<List<OrderDetailDto>> getOrdersByProducer(@PathVariable Long producerInternalId) {
+        List<Order> orders = orderService.listOrdersByProducerInternalId(producerInternalId);
+        List<OrderDetailDto> dtos = orders.stream().map(this::toDetailDto).collect(Collectors.toList());
+        return ResponseEntity.ok(dtos);
+    }
+
+    @GetMapping("/customer/{customerId}")
+    public ResponseEntity<List<OrderDetailDto>> getOrdersByCustomer(@PathVariable Long customerId) {
+        List<Order> orders = orderService.listOrdersByCustomer(customerId);
+        List<OrderDetailDto> dtos = orders.stream().map(this::toDetailDto).collect(Collectors.toList());
+        return ResponseEntity.ok(dtos);
+    }
+
     @GetMapping
     public ResponseEntity<List<OrderDetailDto>> listOrders() {
         List<Order> orders = orderService.listOrders();
@@ -53,12 +70,24 @@ public class OrderController {
         return ResponseEntity.ok(res);
     }
 
+    @PatchMapping("/{orderId}/status")
+    public ResponseEntity<OrderDetailDto> updateOrderStatus(
+            @PathVariable Long orderId,
+            @RequestBody UpdateOrderStatusRequest request) {
+        Order updatedOrder = orderService.updateOrderStatus(orderId, request.getStatus());
+        return ResponseEntity.ok(toDetailDto(updatedOrder));
+    }
+
     private OrderDetailDto toDetailDto(Order order) {
         OrderDetailDto dto = new OrderDetailDto();
         dto.setId(order.getId());
         dto.setReference(order.getReference());
-        dto.setProducerId(order.getProducerId());
+        dto.setProducerKeycloakId(order.getProducer_keycloak_id());
+        dto.setConsumerKeycloakId(order.getConsumer_keycloak_id());
+        dto.setProducerInternalId(order.getProducerInternalId());
+        dto.setCustomerId(order.getCustomerId());
         dto.setStatus(order.getStatus());
+        dto.setDeliveryMode(order.getDeliveryMode());
         dto.setTotalAmount(order.getTotalAmount());
         dto.setCreatedAt(order.getCreatedAt());
         dto.setItems(order.getItems().stream().map(this::toItemDetailDto).collect(Collectors.toList()));

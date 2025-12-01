@@ -1,12 +1,13 @@
 package org.igdevx.spring_boot_order_microservice.dto;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class CreateOrderResponse {
+    private Long id;
     private String reference;
 }
+    

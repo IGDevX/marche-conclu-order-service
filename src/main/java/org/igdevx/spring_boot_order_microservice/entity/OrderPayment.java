@@ -1,16 +1,16 @@
 package org.igdevx.spring_boot_order_microservice.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
 import java.math.BigDecimal;
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "order_payments")
-@Getter
-@Setter
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class OrderPayment {
 
     @Id
@@ -18,19 +18,16 @@ public class OrderPayment {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "order_id")
-    @JsonIgnore
+    @JoinColumn(name = "order_id", nullable = false)
     private Order order;
 
-    @Column(name = "payment_intent_id")
     private String paymentIntentId;
 
-    @Column(name = "status")
     private String status;
 
-    @Column(name = "amount", nullable = false)
+    @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt = Instant.now();
+    @Column(nullable = false)
+    final LocalDateTime createdAt = LocalDateTime.now();
 }
